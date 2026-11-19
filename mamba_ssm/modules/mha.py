@@ -175,8 +175,17 @@ class MHA(nn.Module):
             k, v = kv.unbind(dim=-3)
             k = torch.repeat_interleave(k, dim=2, repeats=self.num_heads // self.num_heads_kv)
             v = torch.repeat_interleave(v, dim=2, repeats=self.num_heads // self.num_heads_kv)
+            is_causal = self.causal and inference_params.seqlen_offset == 0
+            attn_mask = None
+            if self.causal and inference_params.seqlen_offset > 0 and q.shape[1] > 1:
+                # SDPA aligns a causal mask to the top left, but the queries
+                # follow the cached prefix and need a bottom-right-aligned mask.
+                attn_mask = torch.ones(
+                    q.shape[1], k.shape[1], dtype=torch.bool, device=q.device
+                ).tril(diagonal=k.shape[1] - q.shape[1])
             return F.scaled_dot_product_attention(
-                q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), is_causal=self.causal, scale=self.softmax_scale
+                q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2),
+                attn_mask=attn_mask, is_causal=is_causal, scale=self.softmax_scale,
             ).transpose(1, 2)
         else:
             batch = q.shape[0]
